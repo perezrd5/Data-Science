@@ -1,0 +1,292 @@
+---
+title: 'Explore factors affecting income in NLSY ''79 data'
+author: "Doug Perez"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Introduction
+
+Many factors effect a person's income over a period of years. In this analysis, we sought to investigate whether race plays a significant role in determining an individual's income.  Further, we investigated the data over time to find any trends that may have developed over the past three decades.  The income data has been standardized to 2014 dollars, making these comparisons both possible and valid.
+
+## To begin, we initialize the environment and load the data.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+load("income_data_nlsy79.RData")
+load("education_data_nlsy79.RData")
+load("physical_data_nlsy79.RData")
+```
+
+#### Examine the income and physical data sets, as those are the ones we will be working with.
+```{r}
+glimpse(income_data_nlsy79)
+glimpse(physical_data_nlsy79)
+```
+### Next, we set up the conversion table to standardize the income values.  This will be used later in the analysis.
+```{r}
+# Load proportional dollar values.  All multipliers convert to 2014 dollars.  Source:  https://westegg.com/inflation/infl.cgi
+
+income_2014_converter <- data_frame(year = sort(unique(income_data_nlsy79$year))) %>% 
+  mutate(multiplier = c(2.42, 2.34, 2.24, 2.17, 2.13, 2.05, 1.97, 1.88, 1.78, 1.71, 1.66, 1.61, 1.57, 1.49, 1.44, 1.36, 1.31, 1.24, 1.17, 1.10, 1.08, 1.03, 1))
+```
+
+# Analysis of Race vs. Income
+
+Next, we turn our attention to the physical characteristic of race, investigating what effect, if any, it may have on an individual's income.
+
+## Preparation of the data
+
+The income multipliers loaded earlier are multiplied by the raw income data to produce a "true_income" value that adjusts for inflation and other economic conditions, allowing that the data may be compared from year to year.  
+```{r}
+income_phys_all <- income_data_nlsy79 %>%
+  inner_join(physical_data_nlsy79) # %>%
+  # filter(year == 2014)
+
+income_race_all <- select(income_phys_all, CASEID, income, race, year)
+income_race_all <- filter(income_race_all, !is.na(income), !is.na(race), !is.na(year))
+income_race_all
+
+# Convert income to a standard amount for comparison.  Convert all values to 2014 dollars.
+income_race_all <- inner_join(income_race_all, income_2014_converter) %>% 
+  mutate(true_income = income * multiplier)
+```
+
+## Examination of the race variable
+
+```{r}
+unique(income_race_all$race)
+```
+Three values are listed for race, "black", "hispanic", and "NBNH" (Neither Black Nor Hispanic).  As we will see, the third category contains more records than both of the other categories combined.
+```{r}
+# Check sample size
+
+ggplot(
+  data = income_race_all,
+  aes(x = race)
+) + geom_bar() +
+  scale_y_continuous(name = "Count") + 
+  scale_x_discrete(name = "Race")
+```
+
+
+This trend holds true for individual years as well, as seen in 1982, 1998, and 2014 below.
+```{r}
+# 1982
+
+ggplot(
+  data = filter(income_race_all, year == 1982),
+  aes(x = race)
+) + geom_bar() +
+  scale_y_continuous(name = "Count") + 
+  scale_x_discrete(name = "Race")
+
+# 1998
+
+ggplot(
+  data = filter(income_race_all, year == 1998),
+  aes(x = race)
+) + geom_bar() +
+  scale_y_continuous(name = "Count") + 
+  scale_x_discrete(name = "Race")
+
+# 2014
+
+ggplot(
+  data = filter(income_race_all, year == 2014),
+  aes(x = race)
+) + geom_bar() +
+  scale_y_continuous(name = "Count") + 
+  scale_x_discrete(name = "Race")
+```
+
+
+Fortunately, the overall sample size of each individual year and the large sample across all years still allows for meaningful analysis of the black and hispanic race variables.
+
+## Examination of income variable
+
+```{r}
+head(sort(unique(income_race_all$true_income)))
+head(sort(unique(income_race_all$true_income), decreasing = TRUE))
+
+ggplot(data = income_race_all, aes(x = income_race_all$true_income)) +
+  geom_histogram()+
+  scale_y_continuous(name = "Count") + 
+  scale_x_continuous(name = "True Income (2014 Dollars)")
+```
+
+### High income values
+
+A quick glance at the income data reveals several peak outliers.  These are likely the truncation values discussed in the introduction, but we will examine further to determine whether or not they are valid for this analysis.
+
+
+We start by looking at all values above $200,000 and getting a count of unique values to see if we can isolate the truncation numbers.  
+```{r}
+high_income <- filter(income_race_all, income > 200000)
+unique(high_income$income)
+
+nrow(filter(income_race_all, income == 265933))
+nrow(filter(income_race_all, income == 279816))
+nrow(filter(income_race_all, income == 307823))
+nrow(filter(income_race_all, income == 312324))
+nrow(filter(income_race_all, income == 343830))
+nrow(filter(income_race_all, income == 370314))
+
+low_income <- filter(income_race_all, income <= 200000)
+
+# sort(unique(income_race_all$true_income))
+```
+
+265933 279816 307823 312324 343830 370314 appear to be truncated income values.  They are at the top of the scale and between 133 and 146 individuals have the exact same unique income.  That's an awfully specific number for so many people to have it.
+
+Looking at the people with incomes below $200,000, the numbers appear much tidier, mostly ending in round hundreds or thousands, but nearly all ending in zeros.
+
+It seems reasonable to exclude these values at the upper end for analysis, given their innacurate nature due to truncation.
+
+##
+```{r}
+
+income_race_all <- filter(income_race_all, income < 200000 | income %in% c(216200,236000))
+
+ggplot(data = income_race_all, aes(x = income_race_all$true_income)) +
+  geom_histogram()+
+  scale_y_continuous(name = "Count") + 
+  scale_x_continuous(name = "True Income (2014 Dollars)")
+```
+
+### Zero income values
+
+Next, we look at the peak at $0 income.
+
+```{r}
+filter(income_race_all, income == 0)
+```
+
+31,558 records with 0 for income.  These could be due to stay-at-home mothers, individuals in school, unemployment factors unrelated to race, or any other number of possibilities.  For the purposes of this analysis, we will exclude the $0 income records.
+
+```{r}
+# For now, considering only those records with an income > 0
+
+income_race_all <- filter(income_race_all, income > 0)
+
+ggplot(data = income_race_all, aes(x = income_race_all$true_income)) +
+  geom_histogram() +
+  scale_y_continuous(name = "Count") + 
+  scale_x_continuous(name = "True Income (2014 Dollars)")
+```
+
+We see a clearly left-skewed distribution forming as the data is transformed.
+
+
+### Final validity check
+```{r}
+# No NA race values
+sum(is.na(income_race_all$race))
+sum(is.na(income_race_all$income))
+```
+
+We see no NA values for race or income, so we are prepared to move ahead with the analysis.
+
+## Analysis of Mean and Median incomes by race
+```{r}
+ggplot(
+  data = income_race_all,
+  aes(x = race, y = true_income)
+) + geom_boxplot() +
+    scale_y_continuous(breaks = c(0, 20000, 40000, 60000, 80000,100000, 120000, 140000, 160000, 180000,  200000, 220000, 240000, 260000, 280000, 300000, 320000, 340000, 360000, 380000, 400000), labels = c("$0", "$20,000", "$40,000", "$60,000", "$80,000","$100,000", "$120,000", "$140,000", "$160,000", "$180,000",  "$200,000", "$220,000", "$240,000", "$260,000", "$280,000", "$300,000", "$320,000", "$340,000", "$360,000", "$380,000", "$400,000"), name = "True Income") +
+    scale_x_discrete(name = "Race")
+```
+
+The boxplot above clearly illustrates that the median incomes for black and hispanic individuals are lower than those for other races, and that the spread of incomes generally trends higher for hispanics than blacks, and for other groups more than the two minorities broken out in this data.
+
+Here are the overall mean and median values:
+
+```{r}
+print(c("Mean income black: ", mean(income_race_all$true_income[income_race_all$race == "black"])))
+print(c("Mean income hispanic: ", mean(income_race_all$true_income[income_race_all$race == "hispanic"])))
+print(c("Mean income NBNH: ", mean(income_race_all$true_income[income_race_all$race == "NBNH"])))
+
+print(c("Median income black: ", median(income_race_all$true_income[income_race_all$race == "black"])))
+print(c("Median income hispanic: ", median(income_race_all$true_income[income_race_all$race == "hispanic"])))
+print(c("Median income NBNH: ", median(income_race_all$true_income[income_race_all$race == "NBNH"])))
+
+print(c("Mean - Median income black: ", mean(income_race_all$true_income[income_race_all$race == "black"]) - median(income_race_all$true_income[income_race_all$race == "black"])))
+print(c("Mean - Median income hispanic: ", mean(income_race_all$true_income[income_race_all$race == "hispanic"]) - median(income_race_all$true_income[income_race_all$race == "hispanic"])))
+print(c("Mean - Median income NBNH: ", mean(income_race_all$true_income[income_race_all$race == "NBNH"]) - median(income_race_all$true_income[income_race_all$race == "NBNH"])))
+
+print(c("Mean - Median proportion of mean black: ", ((mean(income_race_all$true_income[income_race_all$race == "black"]) - median(income_race_all$true_income[income_race_all$race == "black"]))/mean(income_race_all$true_income[income_race_all$race == "black"]))))
+print(c("Mean - Median proportion of mean hispanic: ", ((mean(income_race_all$true_income[income_race_all$race == "hispanic"]) - median(income_race_all$true_income[income_race_all$race == "hispanic"]))/mean(income_race_all$true_income[income_race_all$race == "hispanic"]))))
+print(c("Mean - Median proportion of mean NBNH: ", ((mean(income_race_all$true_income[income_race_all$race == "NBNH"]) - median(income_race_all$true_income[income_race_all$race == "NBNH"]))/mean(income_race_all$true_income[income_race_all$race == "NBNH"]))))
+```
+
+## Income spreads by race
+
+Next, let's analyze the income spreads by race.
+```{r}
+ggplot(data = income_race_all, aes(x = income_race_all$true_income)) +
+  geom_histogram() +
+  facet_wrap(~race) +
+    scale_x_continuous(breaks = c(0, 100000, 200000, 300000,  400000), labels = c("$0", "$100,000", "$200,000", "$300,000", "$400,000"), name = "True Income") +
+    scale_y_discrete(name = "Count")
+```
+
+The histogram above shows how the cluster of incomes is skewed further to the right (lower income) for both the black and hispanic subgroups, with black incomes clustering even lower.
+
+Let's break this down into individual years and see if there are any changes.
+
+### Income spreads by race, 1982
+
+```{r}
+data_1982 <- filter(income_race_all, year == 1982)
+
+ggplot(data = data_1982, aes(x = data_1982$true_income)) +
+  geom_histogram() +
+  facet_wrap(~race) +
+    scale_x_continuous(breaks = c(0, 50000, 100000), labels = c("$0", "$50,000", "$100,000"), name = "True Income") +
+    scale_y_discrete(name = "Count")
+```
+
+The right-skew of the NBNH group is much clearer in 1982 than for the whole population.  Next, we examine 1998, chosen after the enacting of NAFTA to see if there is any different trend.
+
+### Income spreads by race, 1998
+
+```{r}
+data_1998 <- filter(income_race_all, year == 1998)
+
+ggplot(data = data_1998, aes(x = data_1998$true_income)) +
+  geom_histogram() +
+  facet_wrap(~race) +
+    scale_x_continuous(breaks = c(0, 75000, 150000), labels = c("$0", "$75,000", "$150,000"), name = "True Income") +
+    scale_y_discrete(name = "Count")
+```
+
+The hispanic spread has clearly shifted to the left.  As NAFTA allowed for a more free exchange of goods from Mexico, it is reasonable that the incomes of hispanic people may have seen an increase.  This will be a hypothesis for further investigation.
+
+Finally, we examine the last year of the data, 2014.
+
+### Income spreads by race, 2014
+
+```{r}
+data_2014 <- filter(income_race_all, year == 2014)
+
+ggplot(data = data_2014, aes(x = data_2014$true_income)) +
+  geom_histogram() +
+  facet_wrap(~race) +
+    scale_x_continuous(breaks = c(0, 75000, 150000), labels = c("$0", "$75,000", "$150,000"), name = "True Income") +
+    scale_y_discrete(name = "Count")
+```
+
+This histogram shows a pronounced leftward shift in the incomes of those individuals listed as black, as compared to the data in 1998 or 1982.  However, we also see more outlying peaks in the upper end of the income scale.  It could be that a few black high-earners are pulling the mean data up disproportionately compared to the hispanic or NBNH race groups.
+
+# Conclusion and Hypotheses
+
+
+## Hypotheses to consider for further analysis (Race vs Income)
+
+1) The proportion of high earners is greater for NBNH than for either group, and for hispanics greater than blacks.  Do a few very-high earners skew the numbers disproportionately in both minority groups, but particularly the black group, making the mean values appear more equal than truly represented in the population?
+
+2) Does the hypothesis about NAFTA increasing incomes for hispanic individuals hold?  A further analysis of the pre- and post-NAFTA years is required to fully answer this question, but we expect that mean and median incomes increase for the hispanic population as a result of NAFTA, and that this increase comes as the black population declines or grows more slowly.
+
+3) The NBNH group seems to quietly outpace the two minority groups throughout the study.  We hypothesize that the gap between NBNH and the black and hispanic groups combined has grown over the course of the study.
