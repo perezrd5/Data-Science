@@ -193,7 +193,11 @@ ggplot(lpp, aes(x = write, y = probability, colour = ses)) + geom_line() + facet
 # Poisson regression example (Zero Truncated)
 ########################################################################
 ########################################################################
-
+install.packages("rlang")
+install.packages("knitr")
+install.packages("vctrs")
+install.packages("ggplot2")
+install.packages("VGAM")
 require(foreign)
 require(ggplot2)
 require(VGAM)
@@ -260,23 +264,24 @@ ggplot(output, aes(broken, resid)) +
   geom_jitter(alpha=.25)
 
 
-# First, we get the coefficients from our original model to use as start values for 
-# the model to speed up the time it takes to estimate. Then we write a short 
-# function that takes data and indices as input and returns the parameters we are 
-# interested in. Finally, we pass that to the boot function and do 1200 replicates, 
-# using snow to distribute across four cores. 
+# 1) Get the coefficients from our original model to use as start values for 
+# the model to speed up the time it takes to estimate. 
+# 2) Write a short function that takes data and indices as input and returns the parameters 
+# we are interested in. 
+# 3) Pass that to the boot function and do 1200 replicates, 
+#   using snow to distribute across four cores. 
 
 
-dput(round(coef(m1),3))
+dput(round(coef(m1),3)) # Coefficients
 f <- function(data, i) {
   require(VGAM)
   m <- vglm(formula = stay ~ age + hmo + died, family = pospoisson(),
             data = data[i, ], coefstart = c(2.436, -0.014, -0.136, -0.204))
-  as.vector(t(coef(summary(m))[, 1:2]))
+  as.vector(t(coef(summary(m))[, 1:2])) #Original model coeffs as starting point
 }
 
 set.seed(10)
-res <- boot(dat, f, R = 1200, parallel = "snow", ncpus = 4)
+res <- boot(dat, f, R = 1200, parallel = "snow", ncpus = 4) # 1200 repeats, "snow" parallel option, and 4 cores
 
 ## print results
 res
@@ -305,17 +310,18 @@ row.names(expparms) <- names(coef(m1))
 ## print results
 expparms
 
-# age does not have a significant effect, but hmo and died both do. In order to 
-# better understand our results and model, let's plot some predicted values. 
+# In order to better understand our results and model, let's plot some predicted values. 
 # Because all of our predictors were categorical (hmo and died) or had a small 
 # number of unique values (age) we will get predicted values for all possible 
-# combinations. First we create a new data set using the expand.grid function, 
+# combinations. 
+
+# First we create a new data set using the expand.grid function, 
 # then estimate the predicted values using the predict function, and finally plot them.
 
-newdata <- expand.grid(age = 1:9, hmo = factor(0:1), died = factor(0:1))
-newdata$yhat <- predict(m1, newdata, type = "response")
+newdata <- expand.grid(age = 1:9, hmo = factor(0:1), died = factor(0:1)) # New Data
+newdata$yhat <- predict(m1, newdata, type = "response") # Predict values with our m1 model
 
-ggplot(newdata, aes(x = age, y = yhat, colour = hmo))  +
+ggplot(newdata, aes(x = age, y = yhat, colour = hmo))  + # Plot the results
   geom_point() +
   geom_line() +
   facet_wrap(~ died)
@@ -349,6 +355,7 @@ ggplot(newdata, aes(x = age, y = yhat, colour = hmo, fill = hmo))  +
   geom_line() +
   facet_wrap(~ died)
 
+# And voila!  A Poisson prediction model predicts how many deaths (count) to expect by age for HMO and non-HMO patients.
 
 
 
