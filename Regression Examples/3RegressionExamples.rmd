@@ -1,0 +1,491 @@
+---
+title: "Simple Regression Examples"
+author: "Doug Perez"
+date: "7/6/2019"
+output: pdf_document
+---
+
+# Introduction
+
+This document is intended as a brief introduction to regression models in R.
+Specifically, we will cover logistic, multinomial, and Poisson regression types.
+
+```{r setup_L, include=FALSE}
+library(knitr)
+library(vctrs)
+library(aod)
+library(ggplot2)
+```
+
+# Logistic Regression
+
+To begin, we will load a data set of graduate school admissions.
+
+```{r loadData_L}
+# Graduate school admissions data from UCLA
+mydata <- read.csv("https://stats.idre.ucla.edu/stat/data/binary.csv")
+# Saved at: \Consulting\Public Code Samples\DataScience\Data
+# Alternate URL:  https://1drv.ms/u/s!AgXALnk1NWLck4JA_01l6gpD6pZxpQ
+
+
+## view the first few rows of the data
+head(mydata)
+```
+
+The data set includes a binary response variable called admit.  This variable will be the focus of our attention, and we will attempt to use the gre, gpa, and rank variables as predictors.  Rank is an integer from 1-4 reflecting the prestige of the admitting institution.
+
+Let's really dive in and take a look at the data set:
+
+```{r admitData}
+summary(mydata)
+sapply(mydata, sd)
+xtabs(~admit + rank, data = mydata)
+```
+
+## Model the data
+
+For this first regression example, we will attempt to fit a generalized linear model (glm) to predict the admit (response) variable from the other predictors.
+
+```{r modelFit_L}
+# Factor the rank variable and create a logistic regretion using glm() - Generalized Linear Model
+mydata$rank <- factor(mydata$rank)
+mylogit <- glm(admit ~ gre + gpa + rank, data = mydata, family = "binomial")
+
+# See regression results using summary
+summary(mylogit)
+
+```
+
+## Model output explained
+
+The output begins with R reminding us what the model we ran was, what options we specified, etc. 
+
+Next we see the deviance residuals, which are a measure of model fit. This part of output shows the distribution of the deviance residuals for individual cases used in the model. 
+(Below we discuss how to use summaries of the deviance statistic to assess model fit.)
+
+The next part of the output shows the coefficients, their standard errors, the z-statistic (sometimes called a Wald z-statistic), and the associated p-values. 
+
+Both gre and gpa are statistically significant, as are the three terms for rank. The logistic regression coefficients give the change in the log odds of the outcome for a one unit increase in the predictor variable.
+
+  - For every one unit change in gre, the log odds of admission (versus non-admission) increases by 0.002.
+  - For a one unit increase in gpa, the log odds of being admitted to graduate school increases by 0.804.
+  - The indicator variables for rank have a slightly different interpretation. 
+  - For example, having attended an undergraduate institution with rank of 2, versus an institution with a rank of 1, changes the log odds of admission by -0.675.
+
+Below the table of coefficients are fit indices, including the null and deviance residuals and the AIC
+
+## Model fitness tests
+```{r fitTests_L}
+# We can create confidence levels by log likelihood
+print("CI by log likelihood")
+confint(mylogit)
+# or based on the standard errors:
+print("CI by standard error")
+confint.default(mylogit)
+
+# The wald test will give us the overall effect of the rank variable on admit:
+print("Wald test of the three rank terms")
+wald.test(b = coef(mylogit), Sigma = vcov(mylogit), Terms = 4:6)
+```
+
+The Wald test gives us an overall measure of significance of the rank variable.  The Chi-squared test statistic of 20.9 on 3 degrees of freedom with a p-value of 0.00011 indicates that the rank variable *does* have an overall effect on the admit (response) variable.  
+
+To test variances within the rank term, we can perform another Wald test, isolating the ranks of 2 and 3, the fourth and fifth terms from above, by multiplying them by 1 and -1, respectively, and canceling the rest of the terms by multiplying by zero.  This technique is demonstrated below:
+
+```{r Wald2_3}
+l <- cbind(0, 0, 0, 1, -1, 0)
+wald.test(b = coef(mylogit), Sigma = vcov(mylogit), L = l)
+```
+
+Here we see a result of the chi-squared test statistic of 5.5 with 1 degree of freedom, associated with a p-value of 0.019. This result tells us that the difference between the coefficient for rank=2 and the coefficient for rank=3 is statistically significant.
+
+## Predictions using the model
+
+In order to create predicted probabilities we first need to create a new data frame with the values we want the independent variables to take on to create our predictions.
+
+We will start by calculating the predicted probability of admission at each value of rank, holding gre and gpa at their means. First we create and view the data frame.
+
+```{r predictDF_L}
+newdata1 <- with(mydata, data.frame(gre = mean(gre), gpa = mean(gpa), rank = factor(1:4)))
+
+## view data frame
+newdata1
+
+```
+
+*These objects must have the same names as the variables in your logistic regression above* (e.g. in this example the mean for gre must be named gre). 
+
+Now that we have the data frame we want to use to calculate the predicted probabilities, we can tell R to create the predicted probabilities. We pass the dataframe "newdata1" to the mylogit model using the predict() function.  The result will be a predicted rank in the rankP column of the data frame:
+
+```{r predictRank_L}
+newdata1$rankP <- predict(mylogit, newdata = newdata1, type = "response")
+newdata1
+```
+
+
+In the above output we see that the predicted probability of being accepted into a graduate program is 0.52 for students from the highest prestige undergraduate institutions (rank=1), and 0.18 for students from the lowest ranked institutions (rank=4), holding gre and gpa at their means. 
+
+We can do something very similar to create a table of predicted probabilities varying the value of gre and rank. We are going to plot these, so we will create 100 values of gre between 200 and 800, at each value of rank (i.e., 1, 2, 3, and 4).
+
+```{r plotPredict_L}
+newdata2 <- with(mydata, data.frame(gre = rep(seq(from = 200, to = 800, length.out = 100),
+    4), gpa = mean(gpa), rank = factor(rep(1:4, each = 100))))
+
+```
+
+The code to generate the predicted probabilities (the first line below) is the same as before, except we are also going to ask for standard errors so we can plot a confidence interval. We get the estimates on the link scale and back transform both the predicted values and confidence limits into probabilities.
+
+```{r upperLower_L}
+newdata3 <- cbind(newdata2, predict(mylogit, newdata = newdata2, type = "link",
+    se = TRUE))
+newdata3 <- within(newdata3, {
+    PredictedProb <- plogis(fit)
+    LL <- plogis(fit - (1.96 * se.fit))
+    UL <- plogis(fit + (1.96 * se.fit))
+})
+
+## view first few rows of final dataset
+head(newdata3)
+
+```
+It can also be helpful to use graphs of predicted probabilities to understand and/or present the model. We will use the ggplot2 package for graphing. Below we make a plot with the predicted probabilities, and 95% confidence intervals.
+
+
+```{r lastPlot_L}
+ggplot(newdata3, aes(x = gre, y = PredictedProb)) + geom_ribbon(aes(ymin = LL,
+    ymax = UL, fill = rank), alpha = 0.2) + geom_line(aes(colour = rank),
+    size = 1)
+```
+
+## Fit tests and log likelihood
+
+Concluding, we run some fit tests and take the log likelihood of the model:
+
+```{r lastFit_L}
+# Some methods to test fit below
+with(mylogit, null.deviance - deviance)
+with(mylogit, df.null - df.residual)
+with(mylogit, pchisq(null.deviance - deviance, df.null - df.residual, lower.tail = FALSE))
+#To see the model's log likelihood
+logLik(mylogit)
+
+```
+
+The chi-square of 41.46 with 5 degrees of freedom and an associated p-value of less than 0.001 tells us that our model as a whole fits significantly better than an empty model. 
+
+
+# Multinomial Regression
+
+```{r setup_M, include=FALSE}
+require(foreign)
+require(nnet)
+require(ggplot2)
+require(reshape2)
+```
+
+In this portion of the discussion, we will look at multinomial regression, where we examine the influence of more than one predictor variable on the response.  For example, we might attempt to predict a person's weight using predictor variables of height and gender.
+
+## Data Import and Review
+
+The data we will use to help us explore this regression is a vocational survey of high school students, tracking occupational outcomes along varied academic paths.
+
+```{r dataImport_M}
+# A data set showing occupational outcomes for vocational or academic educational paths
+ml <- read.dta("https://stats.idre.ucla.edu/stat/data/hsbdemo.dta")
+# Saved at: \Consulting\Public Code Samples\DataScience\Data\UCLAHighSchoolVocationalSurvey.dta
+# Alternate URL:  https://1drv.ms/u/s!AgXALnk1NWLck4JDxYy1aZKct65nOw?e=7JBQzi
+
+# Have a look at the data:
+with(ml, table(ses, prog))
+with(ml, do.call(rbind, tapply(write, prog, function(x) c(M = mean(x), SD = sd(x)))))
+```
+
+ses is a 3-level categorical variable representing Socio-Economic Status (SES).  In the first table above, we see the outcomes split by ses; the second table gives us the mean and standard deviation of the three outcome possibilities.
+
+## Construct an initial model
+
+To properly model the multiple levels in our outcome, we must first specify one of the levels to use as our baseline.  Using relevel() below, we choose the "academic" program as our baseline; "general" and "vocation" will be modeled in comparison to "academic".
+
+```{r relevelModel_M}
+# Let's use relevel to create a new variable weighing the "academic" prog variable response
+ml$prog2 <- relevel(ml$prog, ref = "academic")
+test <- multinom(prog2 ~ ses + write, data = ml) # multinom() does not require reshaping like mlogit() does
+summary(test)
+# Test is a multinom() output of our model using the releveled program
+# We run a couple of tests on the model:
+z <- summary(test)$coefficients/summary(test)$standard.errors
+z
+# 2-tailed z test
+p <- (1 - pnorm(abs(z), 0, 1)) * 2
+p
+```
+
+### Model results interpretation
+
+A one-unit increase in the variable write is associated with the decrease in the log odds of being in general program vs. academic program in the amount of .058.
+
+A one-unit increase in the variable write is associated with the decrease in the log odds of being in vocation program vs. academic program. in the amount of .1136 .
+
+The log odds of being in general program vs. in academic program will decrease by 1.163 if moving from ses="low" to ses="high".
+
+The log odds of being in general program vs. in academic program will decrease by 0.533 if moving from ses="low"to ses="middle", although this coefficient is not significant.
+
+The log odds of being in vocation program vs. in academic program will decrease by 0.983 if moving from ses="low" to ses="high".
+
+The log odds of being in vocation program vs. in academic program will increase by 0.291 if moving from ses="low" to ses="middle", although this coefficient is not significant.
+
+## Model fit tests and review
+
+```{r predProb_M}
+# We can start by generating the predicted probabilities for the observations in our dataset and viewing the first few rows:
+  
+head(pp <- fitted(test))
+```
+
+Using the fitted() function, we produce predicted probabilities of the different possible outcomes, based on the supplied variables in the observation.
+
+Another way to understand the model using the predicted probabilities is to look at the averaged predicted probabilities for different values of the continuous predictor variable write within each level of ses.
+
+```{r predProb2_M}
+dwrite <- data.frame(ses = rep(c("low", "middle", "high"), each = 41), write = rep(c(30:70),
+    3))
+
+## store the predicted probabilities for each value of ses and write
+pp.write <- cbind(dwrite, predict(test, newdata = dwrite, type = "probs", se = TRUE))
+
+## calculate the mean probabilities within each level of ses
+by(pp.write[, 3:5], pp.write$ses, colMeans)
+```
+
+## Model Visualized
+
+We close this portion of our analysis plotting some of our predicted results to help identify anything significant lurking inside of the data.
+
+Using the melt() function, we spread our predicted values across the sample range.  The result is what the spread looks like across a wider data set, visually represented showing areas of overlap, convergence, and divergence.
+
+```{r lastPlot_M}
+## melt data set to long for ggplot2
+lpp <- melt(pp.write, id.vars = c("ses", "write"), value.name = "probability")
+head(lpp)  # view first few rows
+## plot predicted probabilities across write values for each level of ses
+## facetted by program type
+ggplot(lpp, aes(x = write, y = probability, colour = ses)) + geom_line() + facet_grid(variable ~
+    ., scales = "free")
+```
+
+# Poisson Regression (Zero-truncated)
+
+A Poisson regression is the choice for counting variables, such as cars arriving as a parking lot over a period of time.  In this example, we will use a Poisson Regression where any zero values are removed from the list to make predictions from our data.
+
+The data set we will use is from hospitals, tracking patients' length of stay, HMO participation, and the variable we will be examining, whether or not the patient died.
+
+```{r setup_P, include=FALSE}
+require(foreign)
+require(ggplot2)
+require(VGAM)
+require(boot)
+```
+```{r loadData_P}
+
+# Import data from hospital tracking patients who have died
+dat <- read.dta("https://stats.idre.ucla.edu/stat/data/ztp.dta")
+# Saved at: \Consulting\Public Code Samples\DataScience\Data\HospitalDeathTracking.dta
+# Alternate URL:  https://1drv.ms/u/s!AgXALnk1NWLck4JBKcMG9lGWFR8TEA?e=jZf1H7
+
+# Convert a couple of the variables we'll be working with to factors
+dat <- within(dat, {
+  hmo <- factor(hmo)
+  died <- factor(died)
+})
+
+summary(dat)
+
+```
+
+## Inspecting the data visually
+
+Let's dive right into this set and start visualizing what's here.
+
+```{r firstPlot_P}
+# To really get a sense for the data, let's plot some graphs:
+# Length of stay with died in facets
+ggplot(dat, aes(stay)) +
+  geom_histogram() +
+  scale_x_log10() +
+  facet_grid(hmo ~ died, margins=TRUE, scales="free_y")
+
+# Examine how stay looks across age groups:
+ggplot(dat, aes(factor(age), stay)) +
+  geom_violin() + # Violin plot is a great choice for this data spread
+  geom_jitter(size=1.5) +
+  scale_y_log10() +
+  stat_smooth(aes(x = age, y = stay, group=1), method="loess")
+
+# Look at live/die *by hmo*
+ggplot(dat, aes(age, fill=died)) +
+  geom_histogram(binwidth=.5, position="fill") +
+  facet_grid(hmo ~ ., margins=TRUE)
+```
+
+The first plot, the histogram, reveals a correlation between shorter stays and HMO participation and the died variable.  This may be a relationship worth examining.  
+
+The violin plot doesn't show a significant variance across age groups, and the bar plot shows us how the probability of died = 1 increases with age, which is entirely expected and not terribly enlightening to examine in greater depth.
+
+## Poisson Model Fitting
+
+To fit the zero-truncated poisson model, we use the vglm function in the VGAM package. This function fits a very flexible class of models called vector generalized linear models to a wide range of assumed distributions. In our case, we believe the data are poisson, but without zeros. Thus the values are strictly positive poisson, for which we use the positive poisson family via the pospoisson function passed to vglm.
+
+```{r initialModel_P}
+m1 <- vglm(stay ~ age + hmo + died, family = pospoisson(), data = dat)
+summary(m1)
+```
+
+Let's visualize the residuals and fitted values to get an idea of how our model fits:
+
+```{r modelCharts_P}
+# plot of residuals versus fitted values
+output <- data.frame(resid = resid(m1), fitted = fitted(m1))
+ggplot(output, aes(fitted, resid)) +
+  geom_jitter(position=position_jitter(width=.25), alpha=.5) +
+  stat_smooth(method="loess")
+
+# Fit lines using quantile regression:
+ggplot(output, aes(fitted, resid)) +
+  geom_jitter(position=position_jitter(width=.25), alpha=.5) +
+  stat_quantile(method="rq")
+
+```
+
+The first plot shows a mean concentrated around zero.  We then calculate the quartiles and add fit lines for the 25th, Median, and 75th percentiles show in the second plot.  As the fitted value increases, we do see the quartiles converging, so let's get a different look at the data for more information:
+
+```{r boxPlot_P}
+output <- within(output, {
+  broken <- cut(fitted, hist(fitted, plot=FALSE)$breaks)
+})
+
+ggplot(output, aes(broken, resid)) +
+ geom_boxplot() +
+ geom_jitter(alpha=.25)
+```
+
+## Poisson Model Fitting
+
+We can get confidence intervals for the parameters and the exponentiated parameters using bootstrapping. For the Poisson model, these would be incident risk ratios. We use the boot package. First, we get the coefficients from our original model to use as start values for the model to speed up the time it takes to estimate. Then we write a short function that takes data and indices as input and returns the parameters we are interested in. Finally, we pass that to the boot function and do 1200 replicates, using snow to distribute across four cores
+
+```{r runModel_P}
+dput(round(coef(m1),3))
+## structure(c(2.436, -0.014, -0.136, -0.204), .Names = c("(Intercept)", 
+## "age", "hmo1", "died1"))
+f <- function(data, i) {
+  require(VGAM)
+  m <- vglm(formula = stay ~ age + hmo + died, family = pospoisson(),
+    data = data[i, ], coefstart = c(2.436, -0.014, -0.136, -0.204))
+  as.vector(t(coef(summary(m))[, 1:2]))
+}
+
+set.seed(10)
+res <- boot(dat, f, R = 1200, parallel = "snow", ncpus = 4)
+
+## print results
+res
+```
+
+The results are alternating parameter estimates and standard errors. That is, the first row has the first parameter estimate from our model. The second has the standard error for the first parameter. The third column contains the bootstrapped standard errors.
+
+Now we can get the confidence intervals for all the parameters. We start on the original scale with percentile and basic bootstrap CIs.
+
+```{r parms_P}
+## basic parameter estimates with percentile and bias adjusted CIs
+parms <- t(sapply(c(1, 3, 5, 7), function(i) {
+  out <- boot.ci(res, index = c(i, i + 1), type = c("perc", "basic"))
+  with(out, c(Est = t0, pLL = percent[4], pUL = percent[5],
+    basicLL = basic[4], basicLL = basic[5]))
+}))
+
+## add row names
+row.names(parms) <- names(coef(m1))
+## print results
+parms
+```
+
+The bootstrapped confidence intervals are wider than would be expected using a normal based approximation. The bootstrapped CIs are more consistent with the CIs from Stata when using robust standard errors.
+
+Now we can estimate the incident risk ratio (IRR) for the Poisson model. This is done using almost identical code as before, but passing a transformation function to the h argument of boot.ci, in this case, exp to exponentiate.
+
+```{r IRR_P}
+## exponentiated parameter estimates with percentile and bias adjusted CIs
+expparms <- t(sapply(c(1, 3, 5, 7), function(i) {
+  out <- boot.ci(res, index = c(i, i + 1), type = c("perc", "basic"), h = exp)
+  with(out, c(Est = t0, pLL = percent[4], pUL = percent[5],
+    basicLL = basic[4], basicLL = basic[5]))
+}))
+
+## add row names
+row.names(expparms) <- names(coef(m1))
+## print results
+expparms
+```
+
+The results are consistent with what we initially viewed graphically, age does not have a significant effect, *but hmo and died both do.* 
+
+## Poisson Prediction Plots
+
+In order to better understand our results and model, let’s plot some predicted values. Because all of our predictors were categorical (hmo and died) or had a small number of unique values (age) we will get predicted values for all possible combinations. First we create a new data set using the expand.grid function, then estimate the predicted values using the predict function, and finally plot them.
+
+```{r lastPlot_P}
+newdata <- expand.grid(age = 1:9, hmo = factor(0:1), died = factor(0:1))
+newdata$yhat <- predict(m1, newdata, type = "response")
+
+ggplot(newdata, aes(x = age, y = yhat, colour = hmo))  +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ died)
+
+```
+
+
+
+If we really wanted to compare the predicted values, we could bootstrap confidence intervals around the predicted estimates. These confidence intervals are not for the predicted value themselves, but that is the mean predicted value (i.e., for the estimate, not a new individual). 
+
+```{r bandPlot_P}
+## function to return predicted values
+fpred <- function(data, i, newdata) {
+  require(VGAM)
+  m <- vglm(formula = stay ~ age + hmo + died, family = pospoisson(),
+    data = data[i, ], coefstart = c(2.436, -0.014, -0.136, -0.204))
+  predict(m, newdata, type = "response")
+}
+
+## set seed and run bootstrap with 1,200 draws
+set.seed(10)
+respred <- boot(dat, fpred, R = 1200, newdata = newdata,
+  parallel = "snow", ncpus = 4)
+
+## get the bootstrapped percentile CIs
+yhat <- t(sapply(1:nrow(newdata), function(i) {
+  out <- boot.ci(respred, index = i, type = c("perc"))
+  with(out, c(Est = t0, pLL = percent[4], pUL = percent[5]))
+}))
+
+## merge CIs with predicted values
+newdata <- cbind(newdata, yhat)
+## graph with CIs
+ggplot(newdata, aes(x = age, y = yhat, colour = hmo, fill = hmo))  +
+  geom_ribbon(aes(ymin = pLL, ymax = pUL), alpha = .25) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ died)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
